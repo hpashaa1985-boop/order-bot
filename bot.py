@@ -12,7 +12,6 @@ from telegram import (
     KeyboardButton,
     LabeledPrice,
     ReplyKeyboardMarkup,
-    ReplyKeyboardRemove,
     Update,
 )
 from telegram.ext import (
@@ -38,13 +37,16 @@ logger = logging.getLogger(__name__)
 # ─── Хранилище (в памяти) ───
 ADMIN_ID_STORAGE = {"admin": None}
 BLOCKED_USERS = set()
-ACTIVE_CHATS = set()          # клиенты, у которых идёт чат
+ACTIVE_CHATS = set()
 USER_LANG = {}
-ADMIN_REPLY_TARGET = {}       # admin_id -> client_id (кому сейчас отвечает админ)
+ADMIN_REPLY_TARGET = {}
+LAST_ORDER_TOTAL = {}         # client_id -> сумма последнего заказа
+PENDING_PAY_INPUT = {}        # admin_id -> client_id (ждём сумму от админа)
 
 # ─── Состояния диалога заказа ───
 (
     STEP_LANG,
+    STEP_PREPAY_INFO,
     STEP_BOT_TYPE,
     STEP_MENU,
     STEP_PAYMENTS,
@@ -53,21 +55,32 @@ ADMIN_REPLY_TARGET = {}       # admin_id -> client_id (кому сейчас о�
     STEP_CONFIRM,
     STEP_FIX_SELECT,
     STEP_DESCRIPTION,
-) = range(9)
+) = range(10)
 
 # ─── Переводы ───
 TEXTS = {
     "ru": {
         "lang_name": "🇷🇺 Русский",
         "choose_lang": "🌐 Выберите язык / Choose language / Оберіть мову:",
+        "prepay_info": (
+            "⚠️ <b>Важная информация о работе</b>\n\n"
+            "🔹 Работа производится <b>только по предоплате</b>.\n"
+            "🔹 Без предоплаты заказ в работу не берётся.\n"
+            "🔹 Вы всегда можете <b>потребовать предоплату назад</b>, "
+            "если разработка ещё не начата или вас что-то не устраивает.\n\n"
+            "Нажмите «Продолжить», чтобы оформить заказ."
+        ),
+        "btn_prepay_continue": "▶️ Продолжить",
+        "btn_prepay_cancel": "❌ Отмена",
         "hello_admin": (
             "👑 Привет, админ!\n\n"
             "Внизу — быстрое меню.\n"
-            "Также команды:\n"
+            "Команды:\n"
             "/reply ID текст — ответить\n"
+            "/pay ID сумма — запросить оплату\n"
             "/block ID, /unblock ID, /blocked\n"
             "/end ID — завершить чат\n"
-            "/stopreply — перестать отвечать клиенту"
+            "/stopreply — перестать отвечать"
         ),
         "start_msg": "👋 Привет! Давайте оформим заказ на бота.\n\n<b>Шаг 1:</b>\n",
         "step": "Шаг",
@@ -83,8 +96,17 @@ TEXTS = {
         "write_desc": "✍️ Напишите подробное описание бота (ТЗ).\nПосле отправки ждите ответа здесь, в боте.",
         "order_sent": "✅ <b>Заказ отправлен!</b>",
         "description": "📝 <b>Описание:</b>",
-        "auto_wait": "🕐 <b>Спасибо за заказ!</b>\nВаша заявка получена. Ожидайте ответа разработчика — обычно в течение нескольких часов. Можете писать сюда любые дополнения — они дойдут до разработчика.",
+        "auto_wait": (
+            "🕐 <b>Спасибо за заказ!</b>\n"
+            "Ваша заявка получена. Ожидайте ответа разработчика — обычно в течение нескольких часов. "
+            "Можете писать сюда любые дополнения — они дойдут до разработчика."
+        ),
         "btn_pay": "💳 Оплатить заказ",
+        "pay_request_client": (
+            "💳 <b>Разработчик выставил счёт на оплату</b>\n"
+            "Сумма: <b>{amount}₴</b>\n\n"
+            "Нажмите кнопку ниже, чтобы оплатить."
+        ),
         "pay_title": "Оплата заказа бота",
         "pay_desc": "Оплата разработки Telegram-бота",
         "pay_label": "Заказ бота",
@@ -93,11 +115,16 @@ TEXTS = {
         "blocked_msg": "🚫 Вы заблокированы разработчиком.",
         "chat_ended_client": "🔒 Разработчик завершил чат. Для нового обращения — /start",
         "order_rejected_client": "❌ К сожалению, ваш заказ был отменён разработчиком.\nДля нового обращения — /start",
-        # быстрые кнопки клиента
         "kb_new_order": "🆕 Новый заказ",
         "kb_change_lang": "🌐 Сменить язык",
         "kb_help": "ℹ️ Помощь",
-        "help_text": "Это бот для заказа Telegram-ботов.\n• 🆕 Новый заказ — оформить заказ\n• 🌐 Сменить язык — переключить язык\n• Просто напишите — сообщение уйдёт разработчику",
+        "help_text": (
+            "Это бот для заказа Telegram-ботов.\n"
+            "• 🆕 Новый заказ — оформить заказ\n"
+            "• 🌐 Сменить язык\n"
+            "• Просто напишите — сообщение уйдёт разработчику\n\n"
+            "⚠️ Работа только по предоплате. Вы всегда можете потребовать предоплату назад."
+        ),
         "questions": [
             "🤖 Тип бота:",
             "📋 Тип меню:",
@@ -109,6 +136,16 @@ TEXTS = {
     "en": {
         "lang_name": "🇬🇧 English",
         "choose_lang": "🌐 Выберите язык / Choose language / Оберіть мову:",
+        "prepay_info": (
+            "⚠️ <b>Important info</b>\n\n"
+            "🔹 Work is done <b>only after prepayment</b>.\n"
+            "🔹 Without prepayment, the order is not taken.\n"
+            "🔹 You can always <b>request a refund</b> "
+            "if development has not started yet or something bothers you.\n\n"
+            "Click Continue to place an order."
+        ),
+        "btn_prepay_continue": "▶️ Continue",
+        "btn_prepay_cancel": "❌ Cancel",
         "hello_admin": "👑 Hi, admin!",
         "start_msg": "👋 Hi! Let's create a bot order.\n\n<b>Step 1:</b>\n",
         "step": "Step",
@@ -124,8 +161,17 @@ TEXTS = {
         "write_desc": "✍️ Write a detailed bot description.\nWait for a reply here in the bot.",
         "order_sent": "✅ <b>Order sent!</b>",
         "description": "📝 <b>Description:</b>",
-        "auto_wait": "🕐 <b>Thanks for your order!</b>\nYour request is received. Wait for the developer's reply — usually within a few hours. You can send additional messages here.",
+        "auto_wait": (
+            "🕐 <b>Thanks for your order!</b>\n"
+            "Your request is received. Wait for the developer's reply — usually within a few hours. "
+            "You can send additional messages here."
+        ),
         "btn_pay": "💳 Pay for order",
+        "pay_request_client": (
+            "💳 <b>Developer sent you an invoice</b>\n"
+            "Amount: <b>{amount}₴</b>\n\n"
+            "Tap the button below to pay."
+        ),
         "pay_title": "Bot order payment",
         "pay_desc": "Payment for Telegram bot development",
         "pay_label": "Bot order",
@@ -137,7 +183,13 @@ TEXTS = {
         "kb_new_order": "🆕 New order",
         "kb_change_lang": "🌐 Change language",
         "kb_help": "ℹ️ Help",
-        "help_text": "This is a bot for ordering Telegram bots.\n• 🆕 New order — place order\n• 🌐 Change language\n• Just type — your message goes to developer",
+        "help_text": (
+            "Bot for ordering Telegram bots.\n"
+            "• 🆕 New order\n"
+            "• 🌐 Change language\n"
+            "• Just type — your message goes to developer\n\n"
+            "⚠️ Prepayment only. You can always request a refund."
+        ),
         "questions": [
             "🤖 Bot type:",
             "📋 Menu type:",
@@ -149,6 +201,16 @@ TEXTS = {
     "uk": {
         "lang_name": "🇺🇦 Українська",
         "choose_lang": "🌐 Виберіть мову / Choose language / Выберите язык:",
+        "prepay_info": (
+            "⚠️ <b>Важлива інформація</b>\n\n"
+            "🔹 Робота виконується <b>тільки за передоплатою</b>.\n"
+            "🔹 Без передоплати замовлення в роботу не береться.\n"
+            "🔹 Ви завжди можете <b>вимагати передоплату назад</b>, "
+            "якщо розробку ще не розпочато або вас щось не влаштовує.\n\n"
+            "Натисніть «Продовжити», щоб оформити замовлення."
+        ),
+        "btn_prepay_continue": "▶️ Продовжити",
+        "btn_prepay_cancel": "❌ Скасувати",
         "hello_admin": "👑 Привіт, адмін!",
         "start_msg": "👋 Привіт! Оформимо замовлення на бота.\n\n<b>Крок 1:</b>\n",
         "step": "Крок",
@@ -164,8 +226,17 @@ TEXTS = {
         "write_desc": "✍️ Напишіть детальний опис бота.\nОчікуйте відповіді тут, у боті.",
         "order_sent": "✅ <b>Замовлення відправлено!</b>",
         "description": "📝 <b>Опис:</b>",
-        "auto_wait": "🕐 <b>Дякуємо за замовлення!</b>\nВашу заявку отримано. Очікуйте відповіді розробника — зазвичай протягом кількох годин. Можете надсилати сюди будь-які доповнення.",
+        "auto_wait": (
+            "🕐 <b>Дякуємо за замовлення!</b>\n"
+            "Вашу заявку отримано. Очікуйте відповіді розробника — зазвичай протягом кількох годин. "
+            "Можете надсилати сюди будь-які доповнення."
+        ),
         "btn_pay": "💳 Оплатити замовлення",
+        "pay_request_client": (
+            "💳 <b>Розробник виставив рахунок</b>\n"
+            "Сума: <b>{amount}₴</b>\n\n"
+            "Натисніть кнопку нижче, щоб оплатити."
+        ),
         "pay_title": "Оплата замовлення бота",
         "pay_desc": "Оплата розробки Telegram-бота",
         "pay_label": "Замовлення бота",
@@ -177,7 +248,13 @@ TEXTS = {
         "kb_new_order": "🆕 Нове замовлення",
         "kb_change_lang": "🌐 Змінити мову",
         "kb_help": "ℹ️ Допомога",
-        "help_text": "Це бот для замовлення Telegram-ботів.\n• 🆕 Нове замовлення\n• 🌐 Змінити мову\n• Просто напишіть — повідомлення піде розробнику",
+        "help_text": (
+            "Бот для замовлення Telegram-ботів.\n"
+            "• 🆕 Нове замовлення\n"
+            "• 🌐 Змінити мову\n"
+            "• Просто напишіть — повідомлення піде розробнику\n\n"
+            "⚠️ Робота тільки за передоплатою. Ви завжди можете вимагати передоплату назад."
+        ),
         "questions": [
             "🤖 Тип бота:",
             "📋 Тип меню:",
@@ -284,7 +361,7 @@ STEP_KEYS = ["bot_type", "menu", "payments", "database", "admin_panel"]
 STEP_OPTIONS = [BOT_TYPES, MENU_OPTIONS, PAYMENT_OPTIONS, DATABASE_OPTIONS, ADMIN_PANEL_OPTIONS]
 
 
-# ─── Health check для Render ───
+# ─── Health check ───
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
@@ -317,6 +394,13 @@ def lang_keyboard():
     ])
 
 
+def prepay_keyboard(lang: str):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(TEXTS[lang]["btn_prepay_continue"], callback_data="prepay_ok")],
+        [InlineKeyboardButton(TEXTS[lang]["btn_prepay_cancel"], callback_data="prepay_cancel")],
+    ])
+
+
 def get_step_keyboard(step_index: int, lang: str) -> InlineKeyboardMarkup:
     options = STEP_OPTIONS[step_index]
     buttons = []
@@ -327,7 +411,6 @@ def get_step_keyboard(step_index: int, lang: str) -> InlineKeyboardMarkup:
 
 
 def get_step_text(step_index: int, lang: str) -> str:
-    """Текст вопроса + описание всех вариантов."""
     header = TEXTS[lang]["questions"][step_index]
     options = STEP_OPTIONS[step_index]
     lines = [f"<b>{header}</b>\n"]
@@ -359,13 +442,13 @@ def confirm_keyboard(lang: str):
 
 
 def admin_order_keyboard(client_id: int, is_blocked: bool = False):
-    """Кнопки под сообщением от клиента."""
     rows = [
         [
             InlineKeyboardButton("💬 Ответить", callback_data=f"reply_{client_id}"),
-            InlineKeyboardButton("🔒 Завершить чат", callback_data=f"endchat_{client_id}"),
+            InlineKeyboardButton("💰 Потребовать оплату", callback_data=f"askpay_{client_id}"),
         ],
         [
+            InlineKeyboardButton("🔒 Завершить чат", callback_data=f"endchat_{client_id}"),
             InlineKeyboardButton("❌ Отклонить заказ", callback_data=f"reject_{client_id}"),
         ],
     ]
@@ -377,7 +460,6 @@ def admin_order_keyboard(client_id: int, is_blocked: bool = False):
 
 
 def client_reply_kb(lang: str):
-    """Reply-клавиатура для клиента (быстрые кнопки внизу)."""
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton(TEXTS[lang]["kb_new_order"])],
@@ -388,7 +470,6 @@ def client_reply_kb(lang: str):
 
 
 def admin_reply_kb():
-    """Reply-клавиатура для админа."""
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton("🚫 Заблокированные"), KeyboardButton("❌ Стоп-ответ")],
@@ -399,10 +480,10 @@ def admin_reply_kb():
 
 
 async def set_admin_commands(app: Application, admin_id: int):
-    """Устанавливает slash-меню команд для админа."""
     cmds = [
         BotCommand("start", "Меню"),
         BotCommand("reply", "Ответ клиенту: /reply ID текст"),
+        BotCommand("pay", "Запросить оплату: /pay ID сумма"),
         BotCommand("block", "Заблокировать: /block ID"),
         BotCommand("unblock", "Разблокировать: /unblock ID"),
         BotCommand("blocked", "Список заблокированных"),
@@ -413,6 +494,21 @@ async def set_admin_commands(app: Application, admin_id: int):
         await app.bot.set_my_commands(cmds, scope=BotCommandScopeChat(chat_id=admin_id))
     except Exception as e:
         logger.error("set_admin_commands: %s", e)
+
+
+async def send_pay_button(context, client_id: int, amount: int):
+    """Отправляет клиенту сообщение с кнопкой оплаты на указанную сумму."""
+    lang = USER_LANG.get(client_id, "ru")
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton(TEXTS[lang]["btn_pay"], callback_data=f"pay_{amount}")
+    ]])
+    LAST_ORDER_TOTAL[client_id] = amount
+    await context.bot.send_message(
+        client_id,
+        TEXTS[lang]["pay_request_client"].format(amount=amount),
+        parse_mode="HTML",
+        reply_markup=kb,
+    )
 
 
 # ─── Клиентские handlers ───
@@ -444,17 +540,36 @@ async def handle_lang(update: Update, context):
     context.user_data["lang"] = lang
     USER_LANG[query.from_user.id] = lang
 
-    # показать вопрос 1 с описаниями
+    # Показать окно с информацией о предоплате
     await query.edit_message_text(
-        get_step_text(0, lang),
-        reply_markup=get_step_keyboard(0, lang),
+        TEXTS[lang]["prepay_info"],
+        reply_markup=prepay_keyboard(lang),
         parse_mode="HTML",
     )
-    # прислать reply-клавиатуру
+    # Клавиатура снизу
     await context.bot.send_message(
         chat_id=query.message.chat_id,
         text="👇",
         reply_markup=client_reply_kb(lang),
+    )
+    return STEP_PREPAY_INFO
+
+
+async def handle_prepay(update: Update, context):
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(context)
+
+    if query.data == "prepay_cancel":
+        context.user_data.clear()
+        await query.edit_message_text(TEXTS[lang]["cancelled"])
+        return ConversationHandler.END
+
+    # prepay_ok → показать первый шаг
+    await query.edit_message_text(
+        get_step_text(0, lang),
+        reply_markup=get_step_keyboard(0, lang),
+        parse_mode="HTML",
     )
     return STEP_BOT_TYPE
 
@@ -552,6 +667,7 @@ async def handle_description(update: Update, context):
     desc = update.message.text
     lang = get_lang(context)
     summary, total = build_summary(context.user_data, lang)
+    LAST_ORDER_TOTAL[user.id] = total
 
     pay_kb = None
     if PAYMENT_PROVIDER_TOKEN:
@@ -559,14 +675,12 @@ async def handle_description(update: Update, context):
             InlineKeyboardButton(TEXTS[lang]["btn_pay"], callback_data=f"pay_{total}")
         ]])
 
-    # итоговое сообщение клиенту
     await update.message.reply_text(
         f"{TEXTS[lang]['order_sent']}\n\n{summary}\n\n"
         f"{TEXTS[lang]['description']}\n{desc}",
         parse_mode="HTML",
         reply_markup=pay_kb,
     )
-    # автоответ
     await update.message.reply_text(TEXTS[lang]["auto_wait"], parse_mode="HTML",
                                     reply_markup=client_reply_kb(lang))
 
@@ -596,7 +710,7 @@ async def handle_description(update: Update, context):
 async def handle_pay(update: Update, context):
     query = update.callback_query
     await query.answer()
-    lang = get_lang(context)
+    lang = get_lang(context, query.from_user.id)
 
     if not PAYMENT_PROVIDER_TOKEN:
         await query.message.reply_text("⚠️ Оплата пока не настроена.")
@@ -640,7 +754,7 @@ async def successful_payment(update: Update, context):
             logger.error("payment notify: %s", e)
 
 
-# ─── Админские действия (кнопки под заказом) ───
+# ─── Админские действия (inline-кнопки) ───
 async def handle_admin_action(update: Update, context):
     query = update.callback_query
     user = query.from_user
@@ -659,9 +773,21 @@ async def handle_admin_action(update: Update, context):
         await query.answer()
         await query.message.reply_text(
             f"✍️ Режим ответа: <code>{client_id}</code>\n"
-            f"Пишите сообщения — они уходят клиенту.\n"
-            f"Чтобы выйти — нажмите «❌ Стоп-ответ» или /stopreply\n"
-            f"Чтобы завершить чат клиента — /end {client_id}",
+            f"Пишите — уйдёт клиенту.\n"
+            f"Выйти — «❌ Стоп-ответ» или /stopreply",
+            parse_mode="HTML",
+        )
+
+    elif action == "askpay":
+        # Спрашиваем у админа сумму
+        PENDING_PAY_INPUT[user.id] = client_id
+        # Если есть последняя сумма заказа — подсказать
+        last = LAST_ORDER_TOTAL.get(client_id)
+        hint = f"\n\nПоследняя сумма заказа: <b>{last}₴</b> (напишите её или другую)" if last else ""
+        await query.answer()
+        await query.message.reply_text(
+            f"💰 Введите сумму в гривнах для клиента <code>{client_id}</code>:{hint}\n\n"
+            f"Просто напишите число (например: <code>500</code>)",
             parse_mode="HTML",
         )
 
@@ -673,7 +799,7 @@ async def handle_admin_action(update: Update, context):
         except Exception as e:
             logger.error(e)
         await query.answer("Заказ отклонён")
-        await query.message.reply_text(f"❌ Заказ клиента <code>{client_id}</code> отменён. Клиент уведомлён.", parse_mode="HTML")
+        await query.message.reply_text(f"❌ Заказ клиента <code>{client_id}</code> отменён.", parse_mode="HTML")
 
     elif action == "endchat":
         ACTIVE_CHATS.discard(client_id)
@@ -684,7 +810,7 @@ async def handle_admin_action(update: Update, context):
         except Exception as e:
             logger.error(e)
         await query.answer("Чат завершён")
-        await query.message.reply_text(f"🔒 Чат с клиентом <code>{client_id}</code> завершён.", parse_mode="HTML")
+        await query.message.reply_text(f"🔒 Чат с <code>{client_id}</code> завершён.", parse_mode="HTML")
 
     elif action == "block":
         BLOCKED_USERS.add(client_id)
@@ -692,12 +818,12 @@ async def handle_admin_action(update: Update, context):
         if ADMIN_REPLY_TARGET.get(user.id) == client_id:
             ADMIN_REPLY_TARGET.pop(user.id, None)
         await query.answer("Заблокирован")
-        await query.message.reply_text(f"🚫 Клиент <code>{client_id}</code> заблокирован.", parse_mode="HTML")
+        await query.message.reply_text(f"🚫 <code>{client_id}</code> заблокирован.", parse_mode="HTML")
 
     elif action == "unblock":
         BLOCKED_USERS.discard(client_id)
         await query.answer("Разблокирован")
-        await query.message.reply_text(f"✅ Клиент <code>{client_id}</code> разблокирован.", parse_mode="HTML")
+        await query.message.reply_text(f"✅ <code>{client_id}</code> разблокирован.", parse_mode="HTML")
 
 
 # ─── Админские команды ───
@@ -717,10 +843,29 @@ async def admin_reply_cmd(update: Update, context):
         ADMIN_REPLY_TARGET[update.effective_user.id] = target_id
         ACTIVE_CHATS.add(target_id)
         await update.message.reply_text(
-            f"✅ Отправлено. Дальше можно просто писать в чат — уйдёт клиенту <code>{target_id}</code>.\n"
+            f"✅ Отправлено. Дальше пишите в чат — уйдёт клиенту <code>{target_id}</code>.\n"
             f"«❌ Стоп-ответ» или /stopreply — чтобы выйти.",
             parse_mode="HTML",
         )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+
+
+async def cmd_pay(update: Update, context):
+    """Команда: /pay ID сумма — выставить счёт."""
+    if not is_admin(update.effective_user):
+        return
+    if len(context.args) < 2:
+        await update.message.reply_text("Формат: /pay ID сумма\nНапример: /pay 123456 500")
+        return
+    try:
+        target = int(context.args[0])
+        amount = int(context.args[1])
+        if target in BLOCKED_USERS:
+            await update.message.reply_text("⚠️ Пользователь заблокирован.")
+            return
+        await send_pay_button(context, target, amount)
+        await update.message.reply_text(f"✅ Клиенту <code>{target}</code> отправлен счёт на {amount}₴", parse_mode="HTML")
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка: {e}")
 
@@ -730,7 +875,7 @@ async def cmd_stop_reply(update: Update, context):
         return
     target = ADMIN_REPLY_TARGET.pop(update.effective_user.id, None)
     if target:
-        await update.message.reply_text(f"✋ Больше не отвечаете клиенту <code>{target}</code>.", parse_mode="HTML")
+        await update.message.reply_text(f"✋ Больше не отвечаете <code>{target}</code>.", parse_mode="HTML")
     else:
         await update.message.reply_text("Вы никому не отвечали.")
 
@@ -804,7 +949,7 @@ async def text_router(update: Update, context):
 
     # === АДМИН ===
     if is_admin(user):
-        # быстрые кнопки
+        # Быстрые кнопки
         if text == "🚫 Заблокированные":
             return await cmd_blocked(update, context)
         if text == "❌ Стоп-ответ":
@@ -813,7 +958,24 @@ async def text_router(update: Update, context):
             await update.message.reply_text(TEXTS["ru"]["hello_admin"])
             return
 
-        # если админ сейчас в режиме ответа — пересылаем клиенту
+        # Если админ вводит сумму для оплаты
+        target = PENDING_PAY_INPUT.get(user.id)
+        if target:
+            try:
+                amount = int(text.strip())
+                if amount <= 0:
+                    raise ValueError()
+                PENDING_PAY_INPUT.pop(user.id, None)
+                await send_pay_button(context, target, amount)
+                await update.message.reply_text(
+                    f"✅ Счёт на <b>{amount}₴</b> отправлен клиенту <code>{target}</code>",
+                    parse_mode="HTML",
+                )
+            except ValueError:
+                await update.message.reply_text("❌ Введите целое число (например: 500). Или отмените /stopreply")
+            return
+
+        # Режим ответа
         target = ADMIN_REPLY_TARGET.get(user.id)
         if target:
             if target in BLOCKED_USERS:
@@ -835,19 +997,19 @@ async def text_router(update: Update, context):
 
     lang = get_lang(context, user.id)
 
-    # быстрые кнопки клиента
-    if text == TEXTS[lang]["kb_new_order"] or text in (TEXTS["ru"]["kb_new_order"], TEXTS["en"]["kb_new_order"], TEXTS["uk"]["kb_new_order"]):
+    # быстрые кнопки клиента (любой язык)
+    if text in (TEXTS["ru"]["kb_new_order"], TEXTS["en"]["kb_new_order"], TEXTS["uk"]["kb_new_order"]):
         return await start(update, context)
 
-    if text == TEXTS[lang]["kb_change_lang"] or text in (TEXTS["ru"]["kb_change_lang"], TEXTS["en"]["kb_change_lang"], TEXTS["uk"]["kb_change_lang"]):
+    if text in (TEXTS["ru"]["kb_change_lang"], TEXTS["en"]["kb_change_lang"], TEXTS["uk"]["kb_change_lang"]):
         await update.message.reply_text(TEXTS["ru"]["choose_lang"], reply_markup=lang_keyboard())
         return
 
-    if text == TEXTS[lang]["kb_help"] or text in (TEXTS["ru"]["kb_help"], TEXTS["en"]["kb_help"], TEXTS["uk"]["kb_help"]):
+    if text in (TEXTS["ru"]["kb_help"], TEXTS["en"]["kb_help"], TEXTS["uk"]["kb_help"]):
         await update.message.reply_text(TEXTS[lang]["help_text"], reply_markup=client_reply_kb(lang))
         return
 
-    # обычное сообщение — пересылаем админу
+    # обычное сообщение → админу
     admin_id = ADMIN_ID_STORAGE.get("admin")
     if not admin_id:
         await update.message.reply_text(TEXTS[lang]["sent_to_dev"])
@@ -884,6 +1046,7 @@ def main():
         entry_points=[CommandHandler("start", start)],
         states={
             STEP_LANG: [CallbackQueryHandler(handle_lang, pattern=r"^lang_")],
+            STEP_PREPAY_INFO: [CallbackQueryHandler(handle_prepay, pattern=r"^prepay_")],
             STEP_BOT_TYPE: [CallbackQueryHandler(handle_choice, pattern=r"^choice_")],
             STEP_MENU: [CallbackQueryHandler(handle_choice, pattern=r"^choice_")],
             STEP_PAYMENTS: [CallbackQueryHandler(handle_choice, pattern=r"^choice_")],
@@ -905,6 +1068,7 @@ def main():
     app.add_handler(conv)
 
     app.add_handler(CommandHandler("reply", admin_reply_cmd))
+    app.add_handler(CommandHandler("pay", cmd_pay))
     app.add_handler(CommandHandler("stopreply", cmd_stop_reply))
     app.add_handler(CommandHandler("block", cmd_block))
     app.add_handler(CommandHandler("unblock", cmd_unblock))
@@ -913,7 +1077,7 @@ def main():
 
     app.add_handler(CallbackQueryHandler(handle_pay, pattern=r"^pay_"))
     app.add_handler(CallbackQueryHandler(
-        handle_admin_action, pattern=r"^(reply|reject|endchat|block|unblock)_"
+        handle_admin_action, pattern=r"^(reply|askpay|reject|endchat|block|unblock)_"
     ))
 
     app.add_handler(PreCheckoutQueryHandler(precheckout))
