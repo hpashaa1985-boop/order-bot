@@ -7,9 +7,14 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     MessageHandler, ContextTypes, ConversationHandler, filters
 )
-import config
 
-# --- МИНИ ВЕБ-СЕРВЕР ДЛЯ RENDER (чтобы не отключали) ---
+# --- НАСТРОЙКИ ---
+# Берем токен из настроек Render (Environment Variables)
+TOKEN = os.environ.get("BOT_TOKEN")
+# Твой юзернейм админа
+ADMIN_USERNAME = "Tuffc1k" 
+
+# --- МИНИ ВЕБ-СЕРВЕР (ДЛЯ RENDER) ---
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -21,11 +26,11 @@ def run_health_check():
     server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
     server.serve_forever()
 
-# --- ВЕСЬ ОСТАЛЬНОЙ ТВОЙ КОД БОТА ---
+# --- КОД БОТА ---
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 
 (STEP_BOT_TYPE, STEP_MENU, STEP_PAYMENTS, STEP_DATABASE, STEP_ADMIN_PANEL, 
- STEP_CONFIRM, STEP_FIX_SELECT, STEP_DESCRIPTION, STEP_ADMIN_REPLY) = range(9)
+ STEP_CONFIRM, STEP_FIX_SELECT, STEP_DESCRIPTION) = range(8)
 
 BOT_TYPES = {"simple": {"label": "Простой бот", "price": 500}, "webapp": {"label": "Бот с WebApp", "price": 2000}, "inline": {"label": "Бот с инлайн-режимом", "price": 1000}}
 MENU_OPTIONS = {"no_menu": {"label": "Без меню", "price": 0}, "reply_menu": {"label": "Reply-меню", "price": 200}, "inline_menu": {"label": "Inline-меню", "price": 300}, "both_menu": {"label": "Оба типа", "price": 400}}
@@ -54,12 +59,12 @@ def build_summary(user_data):
 
 async def start(update, context):
     user = update.effective_user
-    if user.username and user.username.lower() == config.ADMIN_USERNAME.lower():
+    if user.username and user.username.lower() == ADMIN_USERNAME.lower():
         ADMIN_ID_STORAGE["admin"] = user.id
-        await update.message.reply_text("👑 Админ зарегистрирован! Отвечать: /reply ID текст")
+        await update.message.reply_text("👑 Привет, админ! Вы будете получать уведомления о заказах.\nОтветить клиенту: /reply ID текст")
         return ConversationHandler.END
     context.user_data.clear()
-    await update.message.reply_text("👋 Привет! Давай соберем твоего бота.\nВопрос 1:", reply_markup=get_step_keyboard(0), parse_mode="HTML")
+    await update.message.reply_text("👋 Привет! Давайте оформим заказ на бота.\n\n<b>Шаг 1:</b>", reply_markup=get_step_keyboard(0), parse_mode="HTML")
     return STEP_BOT_TYPE
 
 async def handle_choice(update, context):
@@ -68,9 +73,11 @@ async def handle_choice(update, context):
     parts = query.data.split("_")
     step = int(parts[1])
     context.user_data[STEPS_CONFIG[step][0]] = parts[2]
+    
     if step + 1 < len(STEPS_CONFIG):
-        await query.edit_message_text(f"Вопрос {step+2}:", reply_markup=get_step_keyboard(step+1))
+        await query.edit_message_text(f"<b>Шаг {step+2}:</b>\n{STEPS_CONFIG[step+1][1]}", reply_markup=get_step_keyboard(step+1), parse_mode="HTML")
         return STEP_BOT_TYPE + step + 1
+    
     summary, _ = build_summary(context.user_data)
     await query.edit_message_text(summary + "\n\n✅ Всё верно?", reply_markup=InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Продолжить", callback_data="confirm_continue")],
@@ -83,14 +90,15 @@ async def handle_confirm(update, context):
     query = update.callback_query
     await query.answer()
     if query.data == "confirm_continue":
-        await query.edit_message_text("✍️ Напишите подробное ТЗ (описание):")
+        await query.edit_message_text("✍️ Напишите подробное описание (ТЗ) для вашего бота:")
         return STEP_DESCRIPTION
     elif query.data == "confirm_fix":
-        btns = [[InlineKeyboardButton(f"Пункт {i+1}", callback_data=f"fix_{i}")] for i in range(len(STEPS_CONFIG))]
-        await query.edit_message_text("Что исправляем?", reply_markup=InlineKeyboardMarkup(btns))
+        btns = [[InlineKeyboardButton(f"Исправить: {STEPS_CONFIG[i][1]}", callback_data=f"fix_{i}")] for i in range(len(STEPS_CONFIG))]
+        await query.edit_message_text("Что именно вы хотите изменить?", reply_markup=InlineKeyboardMarkup(btns))
         return STEP_FIX_SELECT
+    
     context.user_data.clear()
-    await query.edit_message_text("❌ Отменено. /start для нового заказа.")
+    await query.edit_message_text("❌ Все действия отменены. Чтобы начать заново, введите /start")
     return ConversationHandler.END
 
 async def handle_fix_select(update, context):
@@ -103,26 +111,36 @@ async def handle_fix_select(update, context):
 async def handle_description(update, context):
     desc = update.message.text
     summary, _ = build_summary(context.user_data)
-    await update.message.reply_text("✅ Заказ отправлен! Ждите ответа.")
-    admin_id = ADMIN_ID_STORAGE["admin"] or getattr(config, 'ADMIN_ID', None)
+    await update.message.reply_text("✅ Заказ отправлен! Мы свяжемся с вами в ближайшее время.")
+    
+    admin_id = ADMIN_ID_STORAGE["admin"]
     if admin_id:
-        await context.bot.send_message(admin_id, f"🔔 НОВЫЙ ЗАКАЗ!\nID: <code>{update.effective_user.id}</code>\n@{update.effective_user.username}\n\n{summary}\n\nТЗ: {desc}", parse_mode="HTML")
+        text = f"🔔 <b>НОВЫЙ ЗАКАЗ!</b>\nКлиент: @{update.effective_user.username}\nID: <code>{update.effective_user.id}</code>\n\n{summary}\n\n📝 ТЗ: {desc}\n\nОтветить: /reply {update.effective_user.id} Ваш текст"
+        await context.bot.send_message(admin_id, text, parse_mode="HTML")
     return ConversationHandler.END
 
 async def admin_reply(update, context):
-    if update.effective_user.username.lower() != config.ADMIN_USERNAME.lower(): return
-    if len(context.args) < 2: return
+    if not update.effective_user.username or update.effective_user.username.lower() != ADMIN_USERNAME.lower():
+        return
+    if len(context.args) < 2:
+        await update.message.reply_text("Ошибка! Формат: /reply ID текст")
+        return
     try:
-        await context.bot.send_message(chat_id=int(context.args[0]), text=f"💬 Ответ разработчика:\n\n{' '.join(context.args[1:])}")
-        await update.message.reply_text("Отправлено!")
-    except: await update.message.reply_text("Ошибка отправки.")
+        user_id = int(context.args[0])
+        msg = " ".join(context.args[1:])
+        await context.bot.send_message(user_id, f"💬 <b>Ответ от разработчика:</b>\n\n{msg}", parse_mode="HTML")
+        await update.message.reply_text("✅ Ответ отправлен!")
+    except:
+        await update.message.reply_text("❌ Ошибка при отправке. Проверьте ID.")
 
 def main():
-    # Запускаем веб-сервер в отдельном потоке
+    if not TOKEN:
+        print("Ошибка: Переменная BOT_TOKEN не установлена!")
+        return
+
     threading.Thread(target=run_health_check, daemon=True).start()
+    app = ApplicationBuilder().token(TOKEN).build()
     
-    # Запускаем бота
-    app = ApplicationBuilder().token(config.BOT_TOKEN).build()
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -137,6 +155,7 @@ def main():
         },
         fallbacks=[CommandHandler("start", start)]
     )
+    
     app.add_handler(conv)
     app.add_handler(CommandHandler("reply", admin_reply))
     app.run_polling()
