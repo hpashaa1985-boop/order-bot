@@ -40,6 +40,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ─── Хранилище (в памяти) ───
 ADMIN_ID_STORAGE = {"admin": None}
 BLOCKED_USERS = set()
 ACTIVE_CHATS = set()
@@ -47,8 +48,9 @@ USER_LANG = {}
 ADMIN_REPLY_TARGET = {}
 LAST_ORDER_TOTAL = {}
 PENDING_PAY_INPUT = {}
-PENDING_PAYMENTS = {}  # client_id -> amount
+PENDING_PAYMENTS = {}
 
+# ─── Состояния ───
 (
     STEP_LANG,
     STEP_PREPAY_INFO,
@@ -62,6 +64,7 @@ PENDING_PAYMENTS = {}  # client_id -> amount
     STEP_DESCRIPTION,
 ) = range(10)
 
+# ─── Переводы ───
 TEXTS = {
     "ru": {
         "lang_name": "🇷🇺 Русский",
@@ -123,7 +126,7 @@ TEXTS = {
         ),
         "i_paid_client": (
             "✅ Заявка об оплате отправлена разработчику.\n"
-            "Ожидайте подтверждения. Обычно это занимает немного времени."
+            "Ожидайте подтверждения."
         ),
         "i_paid_admin": (
             "💰 <b>Клиент сообщает об оплате</b>\n"
@@ -133,7 +136,6 @@ TEXTS = {
             "Проверьте поступление и подтвердите."
         ),
         "pay_confirmed_client": "✅ <b>Оплата подтверждена!</b>\nСпасибо, разработчик скоро продолжит работу.",
-        "pay_not_found": "⚠️ Счёт не найден. Дождитесь счёта от разработчика.",
         "sent_to_dev": "📨 Отправлено разработчику",
         "blocked_msg": "🚫 Вы заблокированы разработчиком.",
         "chat_ended_client": "🔒 Разработчик завершил чат. Для нового обращения — /start",
@@ -149,12 +151,13 @@ TEXTS = {
             "⚠️ Работа только по предоплате."
         ),
         "questions": [
-            "🤖 Тип бота:",
-            "📋 Тип меню:",
-            "💳 Нужна оплата в вашем боте?",
-            "🗄 Нужна база данных?",
-            "🔧 Нужна админ-панель?",
+            "🤖 Тип бота",
+            "📋 Тип меню",
+            "💳 Оплата в вашем боте",
+            "🗄 База данных",
+            "🔧 Админ-панель",
         ],
+        "tip": "<i>Нажмите кнопку с номером варианта ⬇️</i>",
     },
     "en": {
         "lang_name": "🇬🇧 English",
@@ -181,7 +184,7 @@ TEXTS = {
         "write_desc": "✍️ Write a detailed bot description.",
         "order_sent": "✅ <b>Order sent!</b>",
         "description": "📝 <b>Description:</b>",
-        "auto_wait": "🕐 <b>Thanks!</b>\nWait for the developer reply. You can send extra messages here.",
+        "auto_wait": "🕐 <b>Thanks!</b>\nWait for the developer reply.",
         "btn_pay": "💳 Pay",
         "btn_i_paid": "✅ I paid",
         "pay_details": (
@@ -206,7 +209,6 @@ TEXTS = {
             "Client: @{username}\nID: <code>{uid}</code>\nAmount: <b>{amount}₴</b>"
         ),
         "pay_confirmed_client": "✅ <b>Payment confirmed!</b>\nThank you!",
-        "pay_not_found": "⚠️ No invoice found.",
         "sent_to_dev": "📨 Sent to developer",
         "blocked_msg": "🚫 You are blocked.",
         "chat_ended_client": "🔒 Chat ended. /start for a new request",
@@ -216,12 +218,13 @@ TEXTS = {
         "kb_help": "ℹ️ Help",
         "help_text": "Order Telegram bots here. Prepayment only.",
         "questions": [
-            "🤖 Bot type:",
-            "📋 Menu type:",
-            "💳 Payments in your bot?",
-            "🗄 Need a database?",
-            "🔧 Need an admin panel?",
+            "🤖 Bot type",
+            "📋 Menu type",
+            "💳 Payments in your bot",
+            "🗄 Database",
+            "🔧 Admin panel",
         ],
+        "tip": "<i>Tap the button with the option number ⬇️</i>",
     },
     "uk": {
         "lang_name": "🇺🇦 Українська",
@@ -273,7 +276,6 @@ TEXTS = {
             "Клієнт: @{username}\nID: <code>{uid}</code>\nСума: <b>{amount}₴</b>"
         ),
         "pay_confirmed_client": "✅ <b>Оплату підтверджено!</b>\nДякуємо!",
-        "pay_not_found": "⚠️ Рахунок не знайдено.",
         "sent_to_dev": "📨 Відправлено розробнику",
         "blocked_msg": "🚫 Вас заблоковано.",
         "chat_ended_client": "🔒 Чат завершено. /start — нове звернення",
@@ -283,62 +285,151 @@ TEXTS = {
         "kb_help": "ℹ️ Допомога",
         "help_text": "Бот для замовлення Telegram-ботів. Лише передоплата.",
         "questions": [
-            "🤖 Тип бота:",
-            "📋 Тип меню:",
-            "💳 Чи потрібна оплата у боті?",
-            "🗄 Чи потрібна база даних?",
-            "🔧 Чи потрібна адмін-панель?",
+            "🤖 Тип бота",
+            "📋 Тип меню",
+            "💳 Оплата у вашому боті",
+            "🗄 База даних",
+            "🔧 Адмін-панель",
         ],
+        "tip": "<i>Натисніть кнопку з номером варіанта ⬇️</i>",
     },
 }
 
+# ─── Варианты с понятными описаниями ───
 BOT_TYPES = {
-    "simple": {"ru": "Простой бот", "en": "Simple bot", "uk": "Простий бот",
-               "desc_ru": "Обычный бот с командами", "desc_en": "Command bot", "desc_uk": "Звичайний бот з командами", "price": 200},
-    "webapp": {"ru": "Бот с WebApp", "en": "Bot with WebApp", "uk": "Бот з WebApp",
-               "desc_ru": "Мини-приложение в Telegram", "desc_en": "Mini-app in Telegram", "desc_uk": "Міні-додаток у Telegram", "price": 800},
-    "inline": {"ru": "Бот с инлайн-режимом", "en": "Inline-mode bot", "uk": "Бот з інлайн-режимом",
-               "desc_ru": "Вызов через @бот в любом чате", "desc_en": "Call via @bot in any chat", "desc_uk": "Виклик через @бот", "price": 400},
+    "simple": {
+        "ru": "Простой бот", "en": "Simple bot", "uk": "Простий бот",
+        "desc_ru": "обычные команды и ответы, без мини-сайта внутри Telegram",
+        "desc_en": "normal commands and replies, no mini-app inside Telegram",
+        "desc_uk": "звичайні команди і відповіді, без міні-сайту в Telegram",
+        "price": 200,
+    },
+    "webapp": {
+        "ru": "Бот с WebApp", "en": "Bot with WebApp", "uk": "Бот з WebApp",
+        "desc_ru": "открывается мини-сайт внутри Telegram (каталог, форма, игра)",
+        "desc_en": "opens a mini-website inside Telegram (catalog, form, game)",
+        "desc_uk": "відкривається міні-сайт у Telegram (каталог, форма, гра)",
+        "price": 800,
+    },
+    "inline": {
+        "ru": "Бот с инлайн-режимом", "en": "Inline-mode bot", "uk": "Бот з інлайн-режимом",
+        "desc_ru": "можно вызывать через @имя_бота в любом чате",
+        "desc_en": "can be used via @bot_name in any chat",
+        "desc_uk": "можна викликати через @імʼя_бота в будь-якому чаті",
+        "price": 400,
+    },
 }
+
 MENU_OPTIONS = {
-    "no_menu": {"ru": "Без меню", "en": "No menu", "uk": "Без меню",
-                "desc_ru": "Только команды", "desc_en": "Commands only", "desc_uk": "Лише команди", "price": 0},
-    "reply_menu": {"ru": "Reply-меню", "en": "Reply menu", "uk": "Reply-меню",
-                   "desc_ru": "Кнопки внизу экрана", "desc_en": "Bottom keyboard", "desc_uk": "Кнопки внизу", "price": 80},
-    "inline_menu": {"ru": "Inline-меню", "en": "Inline menu", "uk": "Inline-меню",
-                    "desc_ru": "Кнопки под сообщениями", "desc_en": "Buttons under messages", "desc_uk": "Кнопки під повідомленнями", "price": 120},
-    "both_menu": {"ru": "Оба типа", "en": "Both types", "uk": "Обидва типи",
-                  "desc_ru": "И reply, и inline", "desc_en": "Both menus", "desc_uk": "Обидва меню", "price": 160},
+    "no_menu": {
+        "ru": "Без меню", "en": "No menu", "uk": "Без меню",
+        "desc_ru": "пользователь пишет команды вручную, кнопок почти нет",
+        "desc_en": "user types commands manually, almost no buttons",
+        "desc_uk": "користувач пише команди вручну, кнопок майже немає",
+        "price": 0,
+    },
+    "reply_menu": {
+        "ru": "Reply-меню", "en": "Reply menu", "uk": "Reply-меню",
+        "desc_ru": "кнопки внизу экрана, как обычная клавиатура телефона",
+        "desc_en": "buttons at the bottom, like a phone keyboard",
+        "desc_uk": "кнопки внизу екрана, як звичайна клавіатура",
+        "price": 80,
+    },
+    "inline_menu": {
+        "ru": "Inline-меню", "en": "Inline menu", "uk": "Inline-меню",
+        "desc_ru": "кнопки прямо под сообщениями бота",
+        "desc_en": "buttons right under the bot messages",
+        "desc_uk": "кнопки прямо під повідомленнями бота",
+        "price": 120,
+    },
+    "both_menu": {
+        "ru": "Оба типа", "en": "Both types", "uk": "Обидва типи",
+        "desc_ru": "и клавиатура внизу, и кнопки под сообщениями",
+        "desc_en": "both bottom keyboard and buttons under messages",
+        "desc_uk": "і клавіатура внизу, і кнопки під повідомленнями",
+        "price": 160,
+    },
 }
+
 PAYMENT_OPTIONS = {
-    "no_pay": {"ru": "Без оплаты", "en": "No payments", "uk": "Без оплати",
-               "desc_ru": "Бесплатно для пользователей", "desc_en": "Free for users", "desc_uk": "Безкоштовно", "price": 0},
-    "stars_pay": {"ru": "Telegram Stars", "en": "Telegram Stars", "uk": "Telegram Stars",
-                  "desc_ru": "Оплата зірками Telegram", "desc_en": "Pay with Stars", "desc_uk": "Оплата зірками", "price": 200},
-    "external_pay": {"ru": "Внешняя оплата", "en": "External payments", "uk": "Зовнішня оплата",
-                    "desc_ru": "Карты / LiqPay и т.п.", "desc_en": "Cards etc.", "desc_uk": "Картки тощо", "price": 400},
+    "no_pay": {
+        "ru": "Без оплаты", "en": "No payments", "uk": "Без оплати",
+        "desc_ru": "в боте нельзя ничего купить/оплатить",
+        "desc_en": "users cannot pay for anything inside the bot",
+        "desc_uk": "у боті неможна нічого купити/оплатити",
+        "price": 0,
+    },
+    "stars_pay": {
+        "ru": "Telegram Stars", "en": "Telegram Stars", "uk": "Telegram Stars",
+        "desc_ru": "оплата звёздами Telegram прямо в мессенджере",
+        "desc_en": "pay with Telegram Stars inside the messenger",
+        "desc_uk": "оплата зірками Telegram прямо в месенджері",
+        "price": 200,
+    },
+    "external_pay": {
+        "ru": "Внешняя оплата", "en": "External payments", "uk": "Зовнішня оплата",
+        "desc_ru": "оплата картой/реквизитами (гривны, банк)",
+        "desc_en": "card/bank payment (real money)",
+        "desc_uk": "оплата карткою/реквізитами (гривні, банк)",
+        "price": 400,
+    },
 }
+
 DATABASE_OPTIONS = {
-    "no_db": {"ru": "Без БД", "en": "No DB", "uk": "Без БД",
-              "desc_ru": "Ничего не хранит", "desc_en": "No storage", "desc_uk": "Нічого не зберігає", "price": 0},
-    "sqlite": {"ru": "SQLite", "en": "SQLite", "uk": "SQLite",
-               "desc_ru": "Лёгкая БД", "desc_en": "Light DB", "desc_uk": "Легка БД", "price": 120},
-    "postgres": {"ru": "PostgreSQL", "en": "PostgreSQL", "uk": "PostgreSQL",
-                 "desc_ru": "Мощная БД", "desc_en": "Powerful DB", "desc_uk": "Потужна БД", "price": 280},
+    "no_db": {
+        "ru": "Без БД", "en": "No DB", "uk": "Без БД",
+        "desc_ru": "бот ничего не запоминает после перезапуска",
+        "desc_en": "bot forgets data after restart",
+        "desc_uk": "бот нічого не памʼятає після перезапуску",
+        "price": 0,
+    },
+    "sqlite": {
+        "ru": "SQLite", "en": "SQLite", "uk": "SQLite",
+        "desc_ru": "простая база: пользователи, заказы, небольшие данные",
+        "desc_en": "simple database: users, orders, small data",
+        "desc_uk": "проста база: користувачі, замовлення, невеликі дані",
+        "price": 120,
+    },
+    "postgres": {
+        "ru": "PostgreSQL", "en": "PostgreSQL", "uk": "PostgreSQL",
+        "desc_ru": "большая надёжная база для серьёзного проекта",
+        "desc_en": "large reliable database for serious projects",
+        "desc_uk": "велика надійна база для серйозного проєкту",
+        "price": 280,
+    },
 }
+
 ADMIN_PANEL_OPTIONS = {
-    "no_admin": {"ru": "Без админки", "en": "No admin", "uk": "Без адмінки",
-                 "desc_ru": "Без панели управления", "desc_en": "No panel", "desc_uk": "Без панелі", "price": 0},
-    "basic_admin": {"ru": "Базовая админка", "en": "Basic admin", "uk": "Базова адмінка",
-                    "desc_ru": "Статистика и рассылка", "desc_en": "Stats & broadcast", "desc_uk": "Статистика і розсилка", "price": 200},
-    "advanced_admin": {"ru": "Расширенная админка", "en": "Advanced admin", "uk": "Розширена адмінка",
-                       "desc_ru": "Полное управление", "desc_en": "Full control", "desc_uk": "Повне керування", "price": 400},
+    "no_admin": {
+        "ru": "Без админки", "en": "No admin", "uk": "Без адмінки",
+        "desc_ru": "управлять ботом можно только через код/разработчика",
+        "desc_en": "manage only via code/developer",
+        "desc_uk": "керувати ботом лише через код/розробника",
+        "price": 0,
+    },
+    "basic_admin": {
+        "ru": "Базовая админка", "en": "Basic admin", "uk": "Базова адмінка",
+        "desc_ru": "простые команды админа: статистика, рассылка",
+        "desc_en": "simple admin tools: stats, broadcast",
+        "desc_uk": "прості команди адміна: статистика, розсилка",
+        "price": 200,
+    },
+    "advanced_admin": {
+        "ru": "Расширенная админка", "en": "Advanced admin", "uk": "Розширена адмінка",
+        "desc_ru": "удобное управление: пользователи, контент, настройки",
+        "desc_en": "full control: users, content, settings",
+        "desc_uk": "зручне керування: користувачі, контент, налаштування",
+        "price": 400,
+    },
 }
 
 STEP_KEYS = ["bot_type", "menu", "payments", "database", "admin_panel"]
 STEP_OPTIONS = [BOT_TYPES, MENU_OPTIONS, PAYMENT_OPTIONS, DATABASE_OPTIONS, ADMIN_PANEL_OPTIONS]
 
+NUM_EMOJI = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"]
 
+
+# ─── Health check ───
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
@@ -353,6 +444,7 @@ def run_health_check():
     HTTPServer(("0.0.0.0", port), HealthCheckHandler).serve_forever()
 
 
+# ─── Утилиты ───
 def is_admin(user) -> bool:
     return bool(user and user.username and user.username.lower() == ADMIN_USERNAME.lower())
 
@@ -380,18 +472,31 @@ def prepay_keyboard(lang: str):
 
 def get_step_keyboard(step_index: int, lang: str) -> InlineKeyboardMarkup:
     options = STEP_OPTIONS[step_index]
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"{v[lang]} — {v['price']}₴", callback_data=f"choice_{step_index}_{k}")]
-        for k, v in options.items()
-    ])
+    buttons = []
+    for i, (k, v) in enumerate(options.items(), start=1):
+        buttons.append([
+            InlineKeyboardButton(
+                f"{i}. {v[lang]} — {v['price']}₴",
+                callback_data=f"choice_{step_index}_{k}",
+            )
+        ])
+    return InlineKeyboardMarkup(buttons)
 
 
 def get_step_text(step_index: int, lang: str) -> str:
+    """Вопрос + понятное описание рядом с каждым вариантом."""
     header = TEXTS[lang]["questions"][step_index]
-    lines = [f"<b>{header}</b>\n"]
-    dk = f"desc_{lang}"
-    for v in STEP_OPTIONS[step_index].values():
-        lines.append(f"• <b>{v[lang]}</b> — {v[dk]}  <i>({v['price']}₴)</i>")
+    options = STEP_OPTIONS[step_index]
+    desc_key = f"desc_{lang}"
+
+    lines = [f"<b>Шаг {step_index + 1}/5 — {header}</b>\n"]
+    for i, v in enumerate(options.values(), start=1):
+        emoji = NUM_EMOJI[i - 1]
+        lines.append(
+            f"{emoji} <b>{v[lang]} — {v['price']}₴</b>\n"
+            f"    └ {v[desc_key]}\n"
+        )
+    lines.append(TEXTS[lang]["tip"])
     return "\n".join(lines)
 
 
@@ -512,7 +617,7 @@ async def send_pay_request(context, client_id: int, amount: int):
     )
 
 
-# ─── handlers ───
+# ─── Клиентские handlers ───
 async def start(update: Update, context):
     user = update.effective_user
     if is_admin(user):
@@ -667,7 +772,6 @@ async def handle_description(update: Update, context):
 
 # ─── Оплата картой ───
 async def handle_pay(update: Update, context):
-    """Показать номер карты."""
     query = update.callback_query
     await query.answer()
     lang = get_lang(context, query.from_user.id)
@@ -681,7 +785,6 @@ async def handle_pay(update: Update, context):
 
 
 async def handle_i_paid(update: Update, context):
-    """Клиент нажал «Я оплатил»."""
     query = update.callback_query
     await query.answer()
     user = query.from_user
@@ -689,7 +792,10 @@ async def handle_i_paid(update: Update, context):
     amount = int(query.data.split("_")[1])
     PENDING_PAYMENTS[user.id] = amount
 
-    await query.edit_message_reply_markup(reply_markup=None)
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
     await query.message.reply_text(TEXTS[lang]["i_paid_client"])
 
     admin_id = ADMIN_ID_STORAGE.get("admin")
@@ -710,12 +816,10 @@ async def handle_i_paid(update: Update, context):
 
 
 async def handle_confirm_pay(update: Update, context):
-    """Админ подтвердил оплату."""
     query = update.callback_query
     if not is_admin(query.from_user):
         await query.answer("Нет доступа", show_alert=True)
         return
-    # confirmpay_{client_id}_{amount}
     parts = query.data.split("_")
     client_id = int(parts[1])
     amount = int(parts[2])
@@ -790,6 +894,7 @@ async def handle_admin_action(update: Update, context):
         await query.message.reply_text(f"✅ <code>{client_id}</code> разблокирован.", parse_mode="HTML")
 
 
+# ─── Админские команды ───
 async def admin_reply_cmd(update: Update, context):
     if not is_admin(update.effective_user):
         return
