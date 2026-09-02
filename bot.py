@@ -302,21 +302,21 @@ BOT_TYPES = {
         "desc_ru": "обычные команды и ответы, без мини-сайта внутри Telegram",
         "desc_en": "normal commands and replies, no mini-app inside Telegram",
         "desc_uk": "звичайні команди і відповіді, без міні-сайту в Telegram",
-        "price": 200,
+        "price": 100,
     },
     "webapp": {
         "ru": "Бот с WebApp", "en": "Bot with WebApp", "uk": "Бот з WebApp",
         "desc_ru": "открывается мини-сайт внутри Telegram (каталог, форма, игра)",
         "desc_en": "opens a mini-website inside Telegram (catalog, form, game)",
         "desc_uk": "відкривається міні-сайт у Telegram (каталог, форма, гра)",
-        "price": 800,
+        "price": 400,
     },
     "inline": {
         "ru": "Бот с инлайн-режимом", "en": "Inline-mode bot", "uk": "Бот з інлайн-режимом",
         "desc_ru": "можно вызывать через @имя_бота в любом чате",
         "desc_en": "can be used via @bot_name in any chat",
         "desc_uk": "можна викликати через @імʼя_бота в будь-якому чаті",
-        "price": 400,
+        "price": 200,
     },
 }
 
@@ -333,21 +333,21 @@ MENU_OPTIONS = {
         "desc_ru": "кнопки внизу экрана, как обычная клавиатура телефона",
         "desc_en": "buttons at the bottom, like a phone keyboard",
         "desc_uk": "кнопки внизу екрана, як звичайна клавіатура",
-        "price": 80,
+        "price": 40,
     },
     "inline_menu": {
         "ru": "Inline-меню", "en": "Inline menu", "uk": "Inline-меню",
         "desc_ru": "кнопки прямо под сообщениями бота",
         "desc_en": "buttons right under the bot messages",
         "desc_uk": "кнопки прямо під повідомленнями бота",
-        "price": 120,
+        "price": 60,
     },
     "both_menu": {
         "ru": "Оба типа", "en": "Both types", "uk": "Обидва типи",
         "desc_ru": "и клавиатура внизу, и кнопки под сообщениями",
         "desc_en": "both bottom keyboard and buttons under messages",
         "desc_uk": "і клавіатура внизу, і кнопки під повідомленнями",
-        "price": 160,
+        "price": 80,
     },
 }
 
@@ -364,14 +364,14 @@ PAYMENT_OPTIONS = {
         "desc_ru": "оплата звёздами Telegram прямо в мессенджере",
         "desc_en": "pay with Telegram Stars inside the messenger",
         "desc_uk": "оплата зірками Telegram прямо в месенджері",
-        "price": 200,
+        "price": 100,
     },
     "external_pay": {
         "ru": "Внешняя оплата", "en": "External payments", "uk": "Зовнішня оплата",
         "desc_ru": "оплата картой/реквизитами (гривны, банк)",
         "desc_en": "card/bank payment (real money)",
         "desc_uk": "оплата карткою/реквізитами (гривні, банк)",
-        "price": 400,
+        "price": 200,
     },
 }
 
@@ -388,14 +388,14 @@ DATABASE_OPTIONS = {
         "desc_ru": "простая база: пользователи, заказы, небольшие данные",
         "desc_en": "simple database: users, orders, small data",
         "desc_uk": "проста база: користувачі, замовлення, невеликі дані",
-        "price": 120,
+        "price": 60,
     },
     "postgres": {
         "ru": "PostgreSQL", "en": "PostgreSQL", "uk": "PostgreSQL",
         "desc_ru": "большая надёжная база для серьёзного проекта",
         "desc_en": "large reliable database for serious projects",
         "desc_uk": "велика надійна база для серйозного проєкту",
-        "price": 280,
+        "price": 140,
     },
 }
 
@@ -412,14 +412,14 @@ ADMIN_PANEL_OPTIONS = {
         "desc_ru": "простые команды админа: статистика, рассылка",
         "desc_en": "simple admin tools: stats, broadcast",
         "desc_uk": "прості команди адміна: статистика, розсилка",
-        "price": 200,
+        "price": 100,
     },
     "advanced_admin": {
         "ru": "Расширенная админка", "en": "Advanced admin", "uk": "Розширена адмінка",
         "desc_ru": "удобное управление: пользователи, контент, настройки",
         "desc_en": "full control: users, content, settings",
         "desc_uk": "зручне керування: користувачі, контент, налаштування",
-        "price": 400,
+        "price": 200,
     },
 }
 
