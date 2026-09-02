@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import threading
@@ -87,8 +88,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
 
 def run_health_check():
     port = int(os.environ.get("PORT", 8080))
-    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
-    server.serve_forever()
+    HTTPServer(("0.0.0.0", port), HealthCheckHandler).serve_forever()
 
 
 def get_step_keyboard(step_index: int) -> InlineKeyboardMarkup:
@@ -96,7 +96,7 @@ def get_step_keyboard(step_index: int) -> InlineKeyboardMarkup:
     buttons = [
         [
             InlineKeyboardButton(
-                text=f"{v['label']} (+{v['price']}₽)",
+                f"{v['label']} (+{v['price']}₽)",
                 callback_data=f"choice_{step_index}_{k}",
             )
         ]
@@ -105,7 +105,7 @@ def get_step_keyboard(step_index: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 
-def build_summary(user_data: dict) -> tuple[str, int]:
+def build_summary(user_data: dict):
     total = 0
     lines = ["📝 <b>Ваш заказ:</b>\n"]
     for i, (key, _, opts) in enumerate(STEPS_CONFIG):
@@ -117,20 +117,35 @@ def build_summary(user_data: dict) -> tuple[str, int]:
     return "\n".join(lines), total
 
 
+def confirm_keyboard():
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("✅ Продолжить", callback_data="confirm_continue")],
+            [InlineKeyboardButton("✏️ Исправить", callback_data="confirm_fix")],
+            [
+                InlineKeyboardButton(
+                    "❌ Отмена (сбросит все выборы)",
+                    callback_data="confirm_cancel",
+                )
+            ],
+        ]
+    )
+
+
 async def start(update: Update, context):
     user = update.effective_user
     if user.username and user.username.lower() == ADMIN_USERNAME.lower():
         ADMIN_ID_STORAGE["admin"] = user.id
         await update.message.reply_text(
-            "👑 Привет, админ! Уведомления о заказах будут приходить сюда.\n"
-            "Ответить клиенту: /reply ID текст"
+            "👑 Привет, админ! Заказы будут приходить сюда.\n"
+            "Ответ клиенту: /reply ID текст"
         )
         return ConversationHandler.END
 
     context.user_data.clear()
     await update.message.reply_text(
-        "👋 Привет! Давайте оформим заказ на бота.\n\n<b>Шаг 1:</b>\n"
-        + STEPS_CONFIG[0][1],
+        "👋 Привет! Оформим заказ на бота.\n\n"
+        f"<b>Шаг 1:</b>\n{STEPS_CONFIG[0][1]}",
         reply_markup=get_step_keyboard(0),
         parse_mode="HTML",
     )
@@ -143,8 +158,7 @@ async def handle_choice(update: Update, context):
 
     parts = query.data.split("_", 2)
     step = int(parts[1])
-    choice = parts[2]
-    context.user_data[STEPS_CONFIG[step][0]] = choice
+    context.user_data[STEPS_CONFIG[step][0]] = parts[2]
 
     if step + 1 < len(STEPS_CONFIG):
         await query.edit_message_text(
@@ -157,18 +171,7 @@ async def handle_choice(update: Update, context):
     summary, _ = build_summary(context.user_data)
     await query.edit_message_text(
         summary + "\n\n✅ Всё верно?",
-        reply_markup=InlineKeyboardMarkup(
-            [
-                [InlineKeyboardButton("✅ Продолжить", callback_data="confirm_continue")],
-                [InlineKeyboardButton("✏️ Исправить", callback_data="confirm_fix")],
-                [
-                    InlineKeyboardButton(
-                        "❌ Отмена (сбросит все выборы)",
-                        callback_data="confirm_cancel",
-                    )
-                ],
-            ]
-        ),
+        reply_markup=confirm_keyboard(),
         parse_mode="HTML",
     )
     return STEP_CONFIRM
@@ -180,7 +183,8 @@ async def handle_confirm(update: Update, context):
 
     if query.data == "confirm_continue":
         await query.edit_message_text(
-            "✍️ Напишите подробное описание (ТЗ) для вашего бота:"
+            "✍️ Напишите подробное описание бота (ТЗ).\n"
+            "После отправки ждите ответа здесь, в боте."
         )
         return STEP_DESCRIPTION
 
@@ -188,21 +192,21 @@ async def handle_confirm(update: Update, context):
         btns = [
             [
                 InlineKeyboardButton(
-                    f"Исправить: {STEPS_CONFIG[i][1]}",
+                    f"{i + 1}. {STEPS_CONFIG[i][1]}",
                     callback_data=f"fix_{i}",
                 )
             ]
             for i in range(len(STEPS_CONFIG))
         ]
         await query.edit_message_text(
-            "Что именно изменить?",
+            "✏️ Что исправить?",
             reply_markup=InlineKeyboardMarkup(btns),
         )
         return STEP_FIX_SELECT
 
     context.user_data.clear()
     await query.edit_message_text(
-        "❌ Все действия отменены.\nЧтобы начать заново — /start"
+        "❌ Все выбранные действия отменены.\nЗаново: /start"
     )
     return ConversationHandler.END
 
@@ -210,10 +214,6 @@ async def handle_confirm(update: Update, context):
 async def handle_fix_select(update: Update, context):
     query = update.callback_query
     await query.answer()
-
-    if not query.data.startswith("fix_"):
-        return STEP_FIX_SELECT
-
     step = int(query.data.split("_")[1])
     await query.edit_message_text(
         f"Исправляем пункт {step + 1}:\n{STEPS_CONFIG[step][1]}",
@@ -228,24 +228,12 @@ async def handle_fix_choice(update: Update, context):
 
     parts = query.data.split("_", 2)
     step = int(parts[1])
-    choice = parts[2]
-    context.user_data[STEPS_CONFIG[step][0]] = choice
+    context.user_data[STEPS_CONFIG[step][0]] = parts[2]
 
     summary, _ = build_summary(context.user_data)
     await query.edit_message_text(
         summary + "\n\n✅ Всё верно?",
-        reply_markup=InlineKeyboardMarkup(
-            [
-                [InlineKeyboardButton("✅ Продолжить", callback_data="confirm_continue")],
-                [InlineKeyboardButton("✏️ Исправить", callback_data="confirm_fix")],
-                [
-                    InlineKeyboardButton(
-                        "❌ Отмена (сбросит все выборы)",
-                        callback_data="confirm_cancel",
-                    )
-                ],
-            ]
-        ),
+        reply_markup=confirm_keyboard(),
         parse_mode="HTML",
     )
     return STEP_CONFIRM
@@ -259,26 +247,27 @@ async def handle_description(update: Update, context):
     await update.message.reply_text(
         f"✅ <b>Заказ отправлен!</b>\n\n{summary}\n\n"
         f"📝 <b>Описание:</b>\n{desc}\n\n"
-        "⏳ Ожидайте ответа прямо в этом боте.",
+        "⏳ Напишите сюда, если нужно что-то добавить. Ждите ответа.",
         parse_mode="HTML",
     )
 
     admin_id = ADMIN_ID_STORAGE.get("admin")
     if admin_id:
-        text = (
-            "🔔 <b>НОВЫЙ ЗАКАЗ!</b>\n"
-            f"Клиент: @{user.username or 'нет'}\n"
-            f"ID: <code>{user.id}</code>\n\n"
-            f"{summary}\n\n"
-            f"📝 ТЗ: {desc}\n\n"
-            f"Ответить:\n<code>/reply {user.id} Ваш текст</code>"
-        )
         try:
-            await context.bot.send_message(admin_id, text, parse_mode="HTML")
+            await context.bot.send_message(
+                admin_id,
+                "🔔 <b>НОВЫЙ ЗАКАЗ!</b>\n"
+                f"Клиент: @{user.username or 'нет'}\n"
+                f"ID: <code>{user.id}</code>\n\n"
+                f"{summary}\n\n"
+                f"📝 ТЗ: {desc}\n\n"
+                f"<code>/reply {user.id} ваш текст</code>",
+                parse_mode="HTML",
+            )
         except Exception as e:
-            logger.error("Не удалось написать админу: %s", e)
+            logger.error("admin notify error: %s", e)
     else:
-        logger.warning("Админ ещё не нажал /start — заказ не доставлен админу")
+        logger.warning("Admin has not pressed /start yet")
 
     return ConversationHandler.END
 
@@ -294,13 +283,13 @@ async def admin_reply(update: Update, context):
 
     try:
         target_id = int(context.args[0])
-        msg = " ".join(context.args[1:])
+        text = " ".join(context.args[1:])
         await context.bot.send_message(
             target_id,
-            f"💬 <b>Ответ от разработчика:</b>\n\n{msg}",
+            f"💬 <b>Ответ от разработчика:</b>\n\n{text}",
             parse_mode="HTML",
         )
-        await update.message.reply_text("✅ Ответ отправлен!")
+        await update.message.reply_text("✅ Отправлено")
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка: {e}")
 
@@ -314,20 +303,25 @@ async def relay_to_admin(update: Update, context):
     try:
         await context.bot.send_message(
             admin_id,
-            f"💬 Сообщение от @{user.username or 'нет'} | ID: <code>{user.id}</code>\n\n"
+            f"💬 От @{user.username or 'нет'} | ID <code>{user.id}</code>\n\n"
             f"{update.message.text}\n\n"
-            f"Ответить: <code>/reply {user.id} текст</code>",
+            f"<code>/reply {user.id} текст</code>",
             parse_mode="HTML",
         )
-        await update.message.reply_text("📨 Сообщение отправлено разработчику!")
+        await update.message.reply_text("📨 Отправлено разработчику")
     except Exception as e:
-        logger.error("Ошибка пересылки: %s", e)
+        logger.error("relay error: %s", e)
 
 
 def main():
     if not TOKEN:
-        print("ERROR: BOT_TOKEN is not set!")
-        return
+        raise SystemExit("BOT_TOKEN is not set in Environment")
+
+    # фикс для новых Python (event loop)
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
 
     threading.Thread(target=run_health_check, daemon=True).start()
 
